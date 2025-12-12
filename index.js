@@ -130,32 +130,67 @@ Return ONLY this JSON object.
       return res.json({ reply, plan });
     }
 
-    // 🍽 NUTRITION COACH MODE
-    if (hasSimpleMessage) {
-      const message = body.message.trim();
-      if (!message) {
-        return res.status(400).json({ reply: "Please send a non-empty message." });
-      }
+// 🍽 NUTRITION COACH MODE
+if (hasSimpleMessage) {
+  const message = body.message.trim();
+  if (!message) {
+    return res.status(400).json({ reply: "Please send a non-empty message.", macros: null });
+  }
 
-      const completion = await client.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are the LVLD Nutrition & Fitness Coach. You help with macros, weight gain, fat loss, performance, and training. Keep advice short, practical, and helpful."
-          },
-          { role: "user", content: message }
-        ],
-        max_tokens: 500
-      });
+  const systemPrompt = `
+You are the LVLD Nutrition & Fitness Coach.
+- Help with macros, weight gain, fat loss, and performance.
+- When the user is clearly asking for daily macro targets, respond as JSON:
 
-      const reply =
-        completion.choices[0]?.message?.content?.trim() ||
-        "I wasn’t able to come up with a response. Try again in a moment.";
+{
+  "reply": "Short explanation of the targets in plain text.",
+  "macros": {
+    "calories": 2500,
+    "protein": 180,
+    "carbs": 230,
+    "fats": 70
+  }
+}
 
-      return res.json({ reply });
+- If they are NOT asking for specific targets, respond as:
+
+{
+  "reply": "Normal helpful answer...",
+  "macros": null
+}
+
+Return ONLY JSON. No markdown, no backticks.
+  `.trim();
+
+  const completion = await client.chat.completions.create({
+    model: "gpt-4.1-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message }
+    ],
+    max_tokens: 500
+  });
+
+  const raw = completion.choices[0]?.message?.content?.trim() || "";
+
+  let reply = raw;
+  let macros = null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.reply === "string") reply = parsed.reply;
+      if (parsed.macros) macros = parsed.macros;
     }
+  } catch (e) {
+    console.error("Failed to parse nutrition JSON:", e, raw);
+    reply = raw || "I wasn’t able to come up with a response. Try again in a moment.";
+    macros = null;
+  }
+
+  return res.json({ reply, macros });
+}
+
 
     // Bad payload
     return res.status(400).json({
