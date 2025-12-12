@@ -37,10 +37,29 @@ app.post("/fitness-coach", async (req, res) => {
 
       const systemPrompt = `
 You are the LVLD Workout Coach.
-- Help the user design practical workouts.
-- You know these available exercise names: ${availableExercises.join(", ") || "bodyweight basics"}.
-- Answer in clear, friendly text.
-- Do NOT return JSON, just plain text workout guidance.
+
+- Design practical strength workouts based on the conversation.
+- Use ONLY these exercise names when possible: ${availableExercises.join(", ") || "basic bodyweight moves"}.
+- You MUST respond as STRICT JSON, no markdown, no backticks.
+
+The JSON format is:
+
+{
+  "reply": "short friendly explanation for the user",
+  "plan": {
+    "restSeconds": number | null,
+    "exercises": [
+      {
+        "name": "Exercise name (must match one of the available exercises, or a simple bodyweight move)",
+        "sets": 3,
+        "reps": 10,
+        "restSeconds": 60
+      }
+    ]
+  }
+}
+
+Return ONLY this JSON object.
       `.trim();
 
       const completion = await client.chat.completions.create({
@@ -49,17 +68,35 @@ You are the LVLD Workout Coach.
           { role: "system", content: systemPrompt },
           ...chatHistory
         ],
-        max_tokens: 600
+        max_tokens: 700,
+        temperature: 0.7
       });
 
-      const reply =
-        completion.choices[0]?.message?.content?.trim() ||
-        "I couldn’t generate a workout right now. Try again in a moment.";
+      const raw = completion.choices[0]?.message?.content?.trim() || "";
 
-      return res.json({
-        reply,
-        plan: null
-      });
+      let reply = raw;
+      let plan = null;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          if (typeof parsed.reply === "string") {
+            reply = parsed.reply;
+          }
+          if (parsed.plan) {
+            plan = parsed.plan;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to parse workout JSON:", e, raw);
+        // fallback: use raw text as reply, no plan
+        reply =
+          raw ||
+          "I couldn’t generate a structured workout right now, but here are some ideas.";
+        plan = null;
+      }
+
+      return res.json({ reply, plan });
     }
 
     // 🍽 NUTRITION COACH MODE
@@ -89,6 +126,7 @@ You are the LVLD Workout Coach.
       return res.json({ reply });
     }
 
+    // Bad payload
     return res.status(400).json({
       reply:
         "Invalid request format for LVLD coach. Send either { message } or { messages, availableExercises }."
