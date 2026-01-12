@@ -49,9 +49,14 @@ function openAIErrorInfo(err) {
     status: err?.status || err?.response?.status,
     message: err?.message,
     code: err?.code,
-    type: err?.type
+    type: err?.type,
+
+    // ✅ NEW (these reveal the real reason: 401/429/etc)
+    error: err?.error,
+    data: err?.response?.data
   };
 }
+
 
 // ===============================
 // Photo â†’ Macro estimate
